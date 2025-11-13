@@ -1,0 +1,13 @@
+# Custom MySQL image with initialization
+FROM mysql:8.0
+
+# Copy initialization script
+COPY init_db.py /docker-entrypoint-initdb.d/init_db.py
+
+# Set permissions
+RUN chmod +x /docker-entrypoint-initdb.d/init_db.py
+
+# Health check
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=5 \
+    CMD mysqladmin ping -h localhost -u root -p${MYSQL_ROOT_PASSWORD} || exit 1
+

@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: reels_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${MYSQL_DB:-reels_db}
+      MYSQL_USER: ${MYSQL_USER:-reels_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-reels_password}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init_db.py:/docker-entrypoint-initdb.d/init_db.py
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpassword}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - reels_network
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: reels_app
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_USER: ${MYSQL_USER:-reels_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-reels_password}
+      MYSQL_DB: ${MYSQL_DB:-reels_db}
+      SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-in-production}
+      FLASK_ENV: production
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - ./static/reels:/app/static/reels
+    networks:
+      - reels_network
+
+volumes:
+  mysql_data:
+
+networks:
+  reels_network:
+    driver: bridge
+

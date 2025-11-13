@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: ${DOCKERHUB_USERNAME:-your-username}/flask-reels-mysql:latest
+    container_name: reels_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${MYSQL_DB:-reels_db}
+      MYSQL_USER: ${MYSQL_USER:-reels_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-reels_password}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpassword}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - reels_network
+
+  app:
+    image: ${DOCKERHUB_USERNAME:-your-username}/flask-reels-app:latest
+    container_name: reels_app
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_USER: ${MYSQL_USER:-reels_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-reels_password}
+      MYSQL_DB: ${MYSQL_DB:-reels_db}
+      SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-in-production}
+      FLASK_ENV: production
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - ./static/reels:/app/static/reels
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5001/')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - reels_network
+
+volumes:
+  mysql_data:
+    driver: local
+
+networks:
+  reels_network:
+    driver: bridge

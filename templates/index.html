@@ -7,35 +7,64 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>📱 Reels</h1>
-            <button class="add-reel-btn" onclick="showAddReelModal()">+ Add Reel</button>
-        </header>
-
-        <div class="reels-container" id="reelsContainer">
-            <div class="loading">Loading reels...</div>
+    <!-- Fixed Header -->
+    <header class="fixed-header">
+        <h1>📱 Reels</h1>
+        <div style="display: flex; align-items: center; gap: 15px;">
+            <div id="viewsCounter" class="views-counter">
+                <span id="viewsText"></span>
+            </div>
+            <button class="add-reel-btn" onclick="showAddReelModal()" id="addReelBtn" style="display: none;">+ Add Reel</button>
         </div>
+    </header>
 
-        <!-- Add Reel Modal -->
-        <div id="addReelModal" class="modal">
+    <!-- Reels Container - Full Screen Vertical Scroll -->
+    <div class="reels-container" id="reelsContainer">
+        <div class="loading">Loading reels...</div>
+    </div>
+
+        <!-- Login Modal -->
+        <div id="loginModal" class="modal">
             <div class="modal-content">
-                <span class="close" onclick="closeAddReelModal()">&times;</span>
-                <h2>Add New Reel</h2>
-                <form id="addReelForm">
+                <span class="close" onclick="closeLoginModal()">&times;</span>
+                <h2>Login Required</h2>
+                <p class="modal-subtitle">You've watched 10 reels! Please login to continue watching.</p>
+                
+                <div class="auth-tabs">
+                    <button class="tab-btn active" onclick="switchTab('login')">Login</button>
+                    <button class="tab-btn" onclick="switchTab('register')">Sign Up</button>
+                </div>
+                
+                <!-- Login Form -->
+                <form id="loginForm" class="auth-form active">
                     <div class="form-group">
-                        <label for="reelUrl">Video URL *</label>
-                        <input type="url" id="reelUrl" name="url" required placeholder="https://example.com/video.mp4">
+                        <label for="loginUsername">Username or Email</label>
+                        <input type="text" id="loginUsername" name="username" required placeholder="Enter your username or email">
                     </div>
                     <div class="form-group">
-                        <label for="reelTitle">Title</label>
-                        <input type="text" id="reelTitle" name="title" placeholder="Enter reel title">
+                        <label for="loginPassword">Password</label>
+                        <input type="password" id="loginPassword" name="password" required placeholder="Enter your password">
+                    </div>
+                    <button type="submit" class="submit-btn">Login</button>
+                    <div id="loginError" class="error-message"></div>
+                </form>
+                
+                <!-- Register Form -->
+                <form id="registerForm" class="auth-form">
+                    <div class="form-group">
+                        <label for="registerUsername">Username</label>
+                        <input type="text" id="registerUsername" name="username" required placeholder="Choose a username">
                     </div>
                     <div class="form-group">
-                        <label for="reelDescription">Description</label>
-                        <textarea id="reelDescription" name="description" rows="3" placeholder="Enter description"></textarea>
+                        <label for="registerEmail">Email</label>
+                        <input type="email" id="registerEmail" name="email" required placeholder="Enter your email">
                     </div>
-                    <button type="submit" class="submit-btn">Add Reel</button>
+                    <div class="form-group">
+                        <label for="registerPassword">Password</label>
+                        <input type="password" id="registerPassword" name="password" required placeholder="At least 6 characters" minlength="6">
+                    </div>
+                    <button type="submit" class="submit-btn">Sign Up</button>
+                    <div id="registerError" class="error-message"></div>
                 </form>
             </div>
         </div>

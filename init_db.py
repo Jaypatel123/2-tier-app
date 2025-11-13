@@ -4,6 +4,10 @@ Run this script to create the database and table structure
 """
 import mysql.connector
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Database configuration
 config = {
@@ -16,7 +20,26 @@ db_name = os.getenv('MYSQL_DB', 'reels_db')
 
 try:
     # Connect to MySQL server
-    conn = mysql.connector.connect(**config)
+    print("Attempting to connect to MySQL server...")
+    print(f"Host: {config['host']}, User: {config['user']}")
+    
+    # Try to connect, with better error handling
+    try:
+        conn = mysql.connector.connect(**config)
+    except mysql.connector.Error as err:
+        if err.errno == 2003:
+            print("\n❌ Error: Cannot connect to MySQL server.")
+            print("   Make sure MySQL is running. Try: brew services start mysql")
+            print("   Or check if MySQL is running: brew services list | grep mysql")
+        elif err.errno == 1045:
+            print("\n❌ Error: Access denied. Check your MySQL username and password.")
+            print("   On macOS with Homebrew MySQL, root user might not have a password.")
+            print("   Try setting MYSQL_PASSWORD='' in your .env file, or set a password.")
+        else:
+            print(f"\n❌ MySQL Error: {err}")
+        raise
+    
+    print("✅ Successfully connected to MySQL server!")
     cursor = conn.cursor()
     
     # Create database if it doesn't exist
@@ -26,11 +49,27 @@ try:
     # Use the database
     cursor.execute(f"USE {db_name}")
     
-    # Create reels table
+    # Create users table
+    create_users_table = """
+    CREATE TABLE IF NOT EXISTS users (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        username VARCHAR(50) UNIQUE NOT NULL,
+        email VARCHAR(100) UNIQUE NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_username (username),
+        INDEX idx_email (email)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    """
+    
+    cursor.execute(create_users_table)
+    print("Table 'users' created or already exists")
+    
+    # Create reels table (updated to use local file paths)
     create_table_query = """
     CREATE TABLE IF NOT EXISTS reels (
         id INT AUTO_INCREMENT PRIMARY KEY,
-        url VARCHAR(500) NOT NULL,
+        filename VARCHAR(500) NOT NULL,
         title VARCHAR(200),
         description TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -46,17 +85,24 @@ try:
     count = cursor.fetchone()[0]
     
     if count == 0:
-        sample_reels = [
-            ("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4", "Big Buck Bunny", "A large and lovable rabbit deals with three tiny bullies."),
-            ("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4", "Elephant's Dream", "The story of two strange characters exploring a surreal world."),
-            ("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4", "For Bigger Blazes", "A fun video for bigger blazes."),
-            ("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4", "For Bigger Escapes", "An escape adventure video."),
-            ("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4", "For Bigger Fun", "A video for bigger fun."),
-        ]
+        # Get list of video files from static/reels folder
+        import os
+        reels_dir = os.path.join(os.path.dirname(__file__), 'static', 'reels')
+        sample_reels = []
         
-        insert_query = "INSERT INTO reels (url, title, description) VALUES (%s, %s, %s)"
-        cursor.executemany(insert_query, sample_reels)
-        print(f"Inserted {len(sample_reels)} sample reels")
+        if os.path.exists(reels_dir):
+            video_files = [f for f in os.listdir(reels_dir) if f.endswith(('.mp4', '.webm', '.mov'))]
+            for filename in video_files:
+                # Extract title from filename (remove extension and clean up)
+                title = filename.rsplit('.', 1)[0].replace('_', ' ').replace('-', ' ')
+                sample_reels.append((filename, title, f"Video: {title}"))
+        
+        if sample_reels:
+            insert_query = "INSERT INTO reels (filename, title, description) VALUES (%s, %s, %s)"
+            cursor.executemany(insert_query, sample_reels)
+            print(f"Inserted {len(sample_reels)} reels from static/reels folder")
+        else:
+            print("No video files found in static/reels folder")
     
     conn.commit()
     cursor.close()

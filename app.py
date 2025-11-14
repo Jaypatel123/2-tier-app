@@ -49,7 +49,20 @@ if S3_CONFIG['bucket_name']:
 
 def get_db_connection():
     """Create and return a MySQL database connection"""
-    return pymysql.connect(**MYSQL_CONFIG)
+    try:
+        return pymysql.connect(**MYSQL_CONFIG)
+    except pymysql.Error as e:
+        error_code, error_msg = e.args
+        if error_code == 1045:
+            print(f"MySQL Authentication Error: {error_msg}")
+            print(f"Attempted connection with user: {MYSQL_CONFIG['user']}")
+            print("Please check your MySQL credentials in .env file:")
+            print(f"  MYSQL_USER={MYSQL_CONFIG['user']}")
+            print(f"  MYSQL_PASSWORD={'*' * len(MYSQL_CONFIG['password']) if MYSQL_CONFIG['password'] else '(empty)'}")
+            print("\nIf using Docker, ensure you're using the correct user:")
+            print("  MYSQL_USER=reels_user (not root)")
+            print("  MYSQL_PASSWORD=reels_password")
+        raise
 
 @app.route('/')
 def index():
@@ -75,17 +88,30 @@ def get_s3_video_url(filename):
                 },
                 ExpiresIn=S3_CONFIG['presigned_url_expiry']
             )
+            print(f"Generated presigned URL for {filename}")
             return url
         else:
             # Generate public URL (if bucket is public)
-            return f"https://{S3_CONFIG['bucket_name']}.s3.{S3_CONFIG['region']}.amazonaws.com/{s3_key}"
+            url = f"https://{S3_CONFIG['bucket_name']}.s3.{S3_CONFIG['region']}.amazonaws.com/{s3_key}"
+            print(f"Generated public URL for {filename}")
+            return url
     except ClientError as e:
-        print(f"Error generating S3 URL for {filename}: {e}")
+        error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+        error_msg = e.response.get('Error', {}).get('Message', str(e))
+        print(f"Error generating S3 URL for {filename}: {error_code} - {error_msg}")
+        if error_code == 'AccessDenied':
+            print(f"Access denied to S3 object: {s3_key}. Check IAM permissions.")
+        elif error_code == 'NoSuchKey':
+            print(f"Object not found in S3: {s3_key}")
+        return None
+    except Exception as e:
+        print(f"Unexpected error generating S3 URL for {filename}: {e}")
         return None
 
 def list_s3_videos():
     """List all video files from S3 bucket"""
     if not s3_client or not S3_CONFIG['bucket_name']:
+        print("S3 client not initialized or bucket name not set")
         return []
     
     video_extensions = ('.mp4', '.webm', '.mov', '.avi', '.mkv')
@@ -93,6 +119,7 @@ def list_s3_videos():
     
     try:
         prefix = S3_CONFIG['folder_prefix'].rstrip('/') + '/'
+        print(f"Listing S3 objects in bucket '{S3_CONFIG['bucket_name']}' with prefix '{prefix}'")
         paginator = s3_client.get_paginator('list_objects_v2')
         
         for page in paginator.paginate(Bucket=S3_CONFIG['bucket_name'], Prefix=prefix):
@@ -102,13 +129,25 @@ def list_s3_videos():
                     filename = os.path.basename(key)
                     if filename.lower().endswith(video_extensions):
                         video_files.append(filename)
+            elif 'KeyCount' in page and page['KeyCount'] == 0:
+                print(f"No objects found in S3 bucket with prefix '{prefix}'")
         
+        print(f"Found {len(video_files)} video files in S3")
         return sorted(video_files)
     except ClientError as e:
-        print(f"Error listing S3 videos: {e}")
+        error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+        error_msg = e.response.get('Error', {}).get('Message', str(e))
+        print(f"Error listing S3 videos: {error_code} - {error_msg}")
+        if error_code == 'AccessDenied':
+            print("Access denied to S3 bucket. Check IAM permissions.")
+        elif error_code == 'NoSuchBucket':
+            print(f"Bucket '{S3_CONFIG['bucket_name']}' does not exist.")
         return []
     except NoCredentialsError:
         print("Error: AWS credentials not found")
+        return []
+    except Exception as e:
+        print(f"Unexpected error listing S3 videos: {e}")
         return []
 
 def list_local_videos():
@@ -137,6 +176,11 @@ def get_reels():
         if s3_client and S3_CONFIG['bucket_name']:
             video_files = list_s3_videos()
             source = 'S3'
+            # If S3 returns no videos, fallback to local
+            if not video_files:
+                print("No videos found in S3, falling back to local files")
+                video_files = list_local_videos()
+                source = 'local'
         else:
             video_files = list_local_videos()
             source = 'local'
@@ -263,28 +307,44 @@ def register():
         # Hash password
         password_hash = hashlib.sha256(password.encode()).hexdigest()
         
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # Check if username or email already exists
-        cursor.execute("SELECT id FROM users WHERE username = %s OR email = %s", (username, email))
-        if cursor.fetchone():
-            cursor.close()
-            conn.close()
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+        except pymysql.Error as e:
             return jsonify({
                 'success': False,
-                'error': 'Username or email already exists'
-            }), 400
+                'error': f'Database connection failed: {str(e)}. Please check your MySQL configuration.'
+            }), 500
         
-        # Create user
-        cursor.execute(
-            "INSERT INTO users (username, email, password_hash, created_at) VALUES (%s, %s, %s, %s)",
-            (username, email, password_hash, datetime.now())
-        )
-        conn.commit()
-        user_id = cursor.lastrowid
-        cursor.close()
-        conn.close()
+        try:
+            # Check if username or email already exists
+            cursor.execute("SELECT id FROM users WHERE username = %s OR email = %s", (username, email))
+            if cursor.fetchone():
+                cursor.close()
+                conn.close()
+                return jsonify({
+                    'success': False,
+                    'error': 'Username or email already exists'
+                }), 400
+            
+            # Create user
+            cursor.execute(
+                "INSERT INTO users (username, email, password_hash, created_at) VALUES (%s, %s, %s, %s)",
+                (username, email, password_hash, datetime.now())
+            )
+            conn.commit()
+            user_id = cursor.lastrowid
+            cursor.close()
+            conn.close()
+        except pymysql.Error as e:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+            return jsonify({
+                'success': False,
+                'error': f'Database error: {str(e)}'
+            }), 500
         
         # Set session
         session['user_id'] = user_id
@@ -322,18 +382,34 @@ def login():
         # Hash password
         password_hash = hashlib.sha256(password.encode()).hexdigest()
         
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+        except pymysql.Error as e:
+            return jsonify({
+                'success': False,
+                'error': f'Database connection failed: {str(e)}. Please check your MySQL configuration.'
+            }), 500
         
-        # Check if input is email (contains @) or username
-        # Try both username and email
-        cursor.execute(
-            "SELECT id, username, email FROM users WHERE (username = %s OR email = %s) AND password_hash = %s",
-            (username_or_email, username_or_email, password_hash)
-        )
-        user = cursor.fetchone()
-        cursor.close()
-        conn.close()
+        try:
+            # Check if input is email (contains @) or username
+            # Try both username and email
+            cursor.execute(
+                "SELECT id, username, email FROM users WHERE (username = %s OR email = %s) AND password_hash = %s",
+                (username_or_email, username_or_email, password_hash)
+            )
+            user = cursor.fetchone()
+            cursor.close()
+            conn.close()
+        except pymysql.Error as e:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+            return jsonify({
+                'success': False,
+                'error': f'Database error: {str(e)}'
+            }), 500
         
         if not user:
             return jsonify({
@@ -385,6 +461,46 @@ def auth_status():
         'views_count': views_count,
         'views_remaining': max(0, 10 - views_count) if not user_id else None
     })
+
+@app.route('/api/debug/s3', methods=['GET'])
+def debug_s3():
+    """Debug endpoint to check S3 configuration and connectivity"""
+    debug_info = {
+        's3_configured': bool(S3_CONFIG['bucket_name']),
+        'bucket_name': S3_CONFIG['bucket_name'],
+        'region': S3_CONFIG['region'],
+        'folder_prefix': S3_CONFIG['folder_prefix'],
+        'use_presigned_urls': S3_CONFIG['use_presigned_urls'],
+        's3_client_initialized': s3_client is not None,
+        'aws_credentials_set': bool(os.getenv('AWS_ACCESS_KEY_ID') and os.getenv('AWS_SECRET_ACCESS_KEY'))
+    }
+    
+    if s3_client and S3_CONFIG['bucket_name']:
+        try:
+            # Test bucket access
+            s3_client.head_bucket(Bucket=S3_CONFIG['bucket_name'])
+            debug_info['bucket_access'] = 'OK'
+            
+            # Try to list objects
+            prefix = S3_CONFIG['folder_prefix'].rstrip('/') + '/'
+            response = s3_client.list_objects_v2(
+                Bucket=S3_CONFIG['bucket_name'],
+                Prefix=prefix,
+                MaxKeys=1
+            )
+            debug_info['list_objects'] = 'OK'
+            debug_info['objects_found'] = response.get('KeyCount', 0)
+            
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+            error_msg = e.response.get('Error', {}).get('Message', str(e))
+            debug_info['bucket_access'] = f'ERROR: {error_code} - {error_msg}'
+            debug_info['list_objects'] = f'ERROR: {error_code} - {error_msg}'
+        except Exception as e:
+            debug_info['bucket_access'] = f'ERROR: {str(e)}'
+            debug_info['list_objects'] = f'ERROR: {str(e)}'
+    
+    return jsonify(debug_info)
 
 if __name__ == '__main__':
     import sys

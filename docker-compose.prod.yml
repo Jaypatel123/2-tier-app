@@ -36,6 +36,14 @@ services:
       MYSQL_DB: ${MYSQL_DB:-reels_db}
       SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-in-production}
       FLASK_ENV: production
+      # S3 Configuration (optional - if not set, will use local files)
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_REELS_FOLDER: ${S3_REELS_FOLDER:-reels/}
+      S3_USE_PRESIGNED_URLS: ${S3_USE_PRESIGNED_URLS:-true}
+      S3_PRESIGNED_URL_EXPIRY: ${S3_PRESIGNED_URL_EXPIRY:-3600}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
     depends_on:
       mysql:
         condition: service_healthy
